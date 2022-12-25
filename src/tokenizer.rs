@@ -65,13 +65,15 @@ pub fn tokenizer(src: &str) -> Result<Vec<Token>, TokenizerError> {
                     col,
                     kind: TokenizerErrorKind::UncloseLeftBracket,
                 })?;
-                ir.push(Token::LoopEnd(org + 1));
-                ir[org as usize] = Token::LoopStart(pc + 1);
+                ir.push(Token::LoopEnd(org));
+                if ir.get(org as usize) == Some(&Token::LoopStart(0)) {
+                    ir[org as usize] = Token::LoopStart(pc);
+                }
             }
 
             _ => {}
         }
-        pc += 1;
+        pc = ir.len() as u32;
     }
 
     if let Some((_, line, col)) = stk.pop() {
@@ -88,6 +90,8 @@ pub fn optimize(tokens: &mut Vec<Token>) {
     let mut observer = 0;
     let mut writer = 0;
     let len = tokens.len();
+
+    let mut stk: Vec<usize> = vec![];
 
     macro_rules! _flod_ir {
         ($var:ident, $x:ident) => {{
@@ -114,6 +118,27 @@ pub fn optimize(tokens: &mut Vec<Token>) {
         }};
     }
 
+    macro_rules! _loop_start_ir {
+        () => {{
+            stk.push(writer);
+            tokens[writer] = Token::LoopStart(0);
+            writer += 1;
+            observer += 1;
+        }};
+    }
+
+    macro_rules! _loop_end_ir {
+        () => {{
+            let org: usize = stk.pop().unwrap();
+            if tokens.get(org) == Some(&Token::LoopStart(0)) {
+                tokens[org] = Token::LoopStart(writer as u32);
+            }
+            tokens[writer] = Token::LoopEnd(org as u32);
+            writer += 1;
+            observer += 1;
+        }};
+    }
+
     use Token::*;
     while observer < len {
         match tokens[observer] {
@@ -123,8 +148,8 @@ pub fn optimize(tokens: &mut Vec<Token>) {
             DecrementPointer(mut x) => _flod_ir!(DecrementPointer, x),
             Input => _normal_ir!(),
             Output => _normal_ir!(),
-            LoopStart(_) => _normal_ir!(),
-            LoopEnd(_) => _normal_ir!(),
+            LoopStart(_) => _loop_start_ir!(),
+            LoopEnd(_) => _loop_end_ir!(),
         }
     }
     tokens.truncate(writer);
@@ -137,10 +162,28 @@ fn test_compile() {
         tokenizer("+[,.]").unwrap(),
         vec![
             Token::IncrementData(1),
-            Token::LoopStart(5),
+            Token::LoopStart(4),
             Token::Input,
             Token::Output,
-            Token::LoopEnd(2),
+            Token::LoopEnd(1),
+        ]
+    );
+
+    assert_eq!(
+        tokenizer(
+            "[arst]+[,.  
+        +]"
+        )
+        .unwrap(),
+        vec![
+            Token::LoopStart(1),
+            Token::LoopEnd(0),
+            Token::IncrementData(1),
+            Token::LoopStart(7),
+            Token::Input,
+            Token::Output,
+            Token::IncrementData(1),
+            Token::LoopEnd(3),
         ]
     );
 
@@ -159,9 +202,9 @@ fn test_compile() {
     assert_eq!(
         token,
         vec![
-            Token::LoopStart(8),
+            Token::LoopStart(2),
             Token::IncrementData(6),
-            Token::LoopEnd(1),
+            Token::LoopEnd(0),
         ]
     )
 }
